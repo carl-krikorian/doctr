@@ -1,4 +1,4 @@
-# Copyright (C) 2021-2022, Mindee.
+# Copyright (C) 2021-2023, Mindee.
 
 # This program is licensed under the Apache License 2.0.
 # See LICENSE or go to <https://opensource.org/licenses/Apache-2.0> for full license details.
@@ -20,7 +20,14 @@ import wandb
 from fastprogress.fastprogress import master_bar, progress_bar
 from torch.optim.lr_scheduler import CosineAnnealingLR, MultiplicativeLR, OneCycleLR
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
-from torchvision.transforms import ColorJitter, Compose, Normalize
+from torchvision.transforms.v2 import (
+    Compose,
+    GaussianBlur,
+    Normalize,
+    RandomGrayscale,
+    RandomPerspective,
+    RandomPhotometricDistort,
+)
 
 from doctr import transforms as T
 from doctr.datasets import VOCABS, RecognitionDataset, WordGenerator
@@ -102,14 +109,12 @@ def record_lr(
 
 
 def fit_one_epoch(model, train_loader, batch_transforms, optimizer, scheduler, mb, amp=False):
-
     if amp:
         scaler = torch.cuda.amp.GradScaler()
 
     model.train()
     # Iterate over the batches of the dataset
     for images, targets in progress_bar(train_loader, parent=mb):
-
         if torch.cuda.is_available():
             images = images.cuda()
         images = batch_transforms(images)
@@ -171,7 +176,6 @@ def evaluate(model, val_loader, batch_transforms, val_metric, amp=False):
 
 
 def main(args):
-
     print(args)
 
     if args.push_to_hub:
@@ -281,7 +285,12 @@ def main(args):
                     T.Resize((args.input_size, 4 * args.input_size), preserve_aspect_ratio=True),
                     # Augmentations
                     T.RandomApply(T.ColorInversion(), 0.1),
-                    ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.02),
+                    RandomGrayscale(p=0.1),
+                    RandomPhotometricDistort(p=0.1),
+                    T.RandomApply(T.RandomShadow(), p=0.4),
+                    T.RandomApply(T.GaussianNoise(mean=0, std=0.1), 0.1),
+                    T.RandomApply(GaussianBlur(3), 0.3),
+                    RandomPerspective(distortion_scale=0.2, p=0.3),
                 ]
             ),
         )
@@ -304,7 +313,12 @@ def main(args):
                     T.Resize((args.input_size, 4 * args.input_size), preserve_aspect_ratio=True),
                     # Ensure we have a 90% split of white-background images
                     T.RandomApply(T.ColorInversion(), 0.9),
-                    ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.02),
+                    RandomGrayscale(p=0.1),
+                    RandomPhotometricDistort(p=0.1),
+                    T.RandomApply(T.RandomShadow(), p=0.4),
+                    T.RandomApply(T.GaussianNoise(mean=0, std=0.1), 0.1),
+                    T.RandomApply(GaussianBlur(3), 0.3),
+                    RandomPerspective(distortion_scale=0.2, p=0.3),
                 ]
             ),
         )
@@ -350,7 +364,6 @@ def main(args):
 
     # W&B
     if args.wb:
-
         run = wandb.init(
             name=exp_name,
             project="text-recognition",

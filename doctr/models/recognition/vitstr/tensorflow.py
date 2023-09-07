@@ -1,4 +1,4 @@
-# Copyright (C) 2022, Mindee.
+# Copyright (C) 2021-2023, Mindee.
 
 # This program is licensed under the Apache License 2.0.
 # See LICENSE or go to <https://opensource.org/licenses/Apache-2.0> for full license details.
@@ -23,7 +23,7 @@ default_cfgs: Dict[str, Dict[str, Any]] = {
         "std": (0.299, 0.296, 0.301),
         "input_shape": (32, 128, 3),
         "vocab": VOCABS["french"],
-        "url": None,
+        "url": "https://doctr-static.mindee.com/models?id=v0.6.0/vitstr_small-358fab2e.zip&src=0",
     },
     "vitstr_base": {
         "mean": (0.694, 0.695, 0.693),
@@ -57,22 +57,20 @@ class ViTSTR(_ViTSTR, Model):
         feature_extractor,
         vocab: str,
         embedding_units: int,
-        max_length: int = 25,
+        max_length: int = 32,
         dropout_prob: float = 0.0,
         input_shape: Tuple[int, int, int] = (32, 128, 3),  # different from paper
         exportable: bool = False,
         cfg: Optional[Dict[str, Any]] = None,
     ) -> None:
-
         super().__init__()
         self.vocab = vocab
         self.exportable = exportable
         self.cfg = cfg
-        # NOTE: different from paper, who uses eos also as pad token
-        self.max_length = max_length + 3  # Add 1 step for EOS, 1 for SOS, 1 for PAD
+        self.max_length = max_length + 2  # +2 for SOS and EOS
 
         self.feat_extractor = feature_extractor
-        self.head = layers.Dense(len(self.vocab) + 3, name="head")
+        self.head = layers.Dense(len(self.vocab) + 1, name="head")  # +1 for EOS
 
         self.postprocessor = ViTSTRPostProcessor(vocab=self.vocab)
 
@@ -100,11 +98,11 @@ class ViTSTR(_ViTSTR, Model):
         # One-hot gt labels
         oh_gt = tf.one_hot(gt, depth=model_output.shape[2])
         # Compute loss: don't forget to shift gt! Otherwise the model learns to output the gt[t-1]!
-        # The "masked" first gt char is <sos>. Delete last logit of the model output.
-        cce = tf.nn.softmax_cross_entropy_with_logits(oh_gt[:, 1:, :], model_output[:, :-1, :])
+        # The "masked" first gt char is <sos>.
+        cce = tf.nn.softmax_cross_entropy_with_logits(oh_gt[:, 1:, :], model_output)
         # Compute mask
         mask_values = tf.zeros_like(cce)
-        mask_2d = tf.sequence_mask(seq_len, input_len - 1)  # delete the last mask timestep as well
+        mask_2d = tf.sequence_mask(seq_len, input_len)
         masked_loss = tf.where(mask_2d, cce, mask_values)
         ce_loss = tf.math.divide(tf.reduce_sum(masked_loss, axis=1), tf.cast(seq_len, model_output.dtype))
 
@@ -118,7 +116,6 @@ class ViTSTR(_ViTSTR, Model):
         return_preds: bool = False,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-
         features = self.feat_extractor(x, **kwargs)  # (batch_size, patches_seqlen, d_model)
 
         if target is not None:
@@ -128,11 +125,12 @@ class ViTSTR(_ViTSTR, Model):
         if kwargs.get("training", False) and target is None:
             raise ValueError("Need to provide labels during training")
 
-        features = features[:, : self.max_length + 1]  # add 1 for unused cls token (ViT)
-        # (batch_size, max_length + 1, d_model)
+        features = features[:, : self.max_length]  # (batch_size, max_length, d_model)
         B, N, E = features.shape
         features = tf.reshape(features, (B * N, E))
-        logits = tf.reshape(self.head(features), (B, N, len(self.vocab) + 3))  # (batch_size, max_length + 1, vocab + 3)
+        logits = tf.reshape(
+            self.head(features, **kwargs), (B, N, len(self.vocab) + 1)
+        )  # (batch_size, max_length, vocab + 1)
         decoded_features = logits[:, 1:]  # remove cls_token
 
         out: Dict[str, tf.Tensor] = {}
@@ -186,26 +184,28 @@ def _vitstr(
     arch: str,
     pretrained: bool,
     backbone_fn,
-    pretrained_backbone: bool = False,  # NOTE: training from scratch without a pretrained backbone works better
     input_shape: Optional[Tuple[int, int, int]] = None,
     **kwargs: Any,
 ) -> ViTSTR:
-
-    pretrained_backbone = pretrained_backbone and not pretrained
-
     # Patch the config
     _cfg = deepcopy(default_cfgs[arch])
     _cfg["input_shape"] = input_shape or _cfg["input_shape"]
     _cfg["vocab"] = kwargs.get("vocab", _cfg["vocab"])
+    patch_size = kwargs.get("patch_size", (4, 8))
 
     kwargs["vocab"] = _cfg["vocab"]
 
     # Feature extractor
     feat_extractor = backbone_fn(
-        pretrained=pretrained_backbone,
+        # NOTE: we don't use a pretrained backbone for non-rectangular patches to avoid the pos embed mismatch
+        pretrained=False,
         input_shape=_cfg["input_shape"],
+        patch_size=patch_size,
         include_top=False,
     )
+
+    kwargs.pop("patch_size", None)
+    kwargs.pop("pretrained_backbone", None)
 
     # Build the model
     model = ViTSTR(feat_extractor, cfg=_cfg, **kwargs)
@@ -238,6 +238,7 @@ def vitstr_small(pretrained: bool = False, **kwargs: Any) -> ViTSTR:
         pretrained,
         vit_s,
         embedding_units=384,
+        patch_size=(4, 8),
         **kwargs,
     )
 
@@ -264,5 +265,6 @@ def vitstr_base(pretrained: bool = False, **kwargs: Any) -> ViTSTR:
         pretrained,
         vit_b,
         embedding_units=768,
+        patch_size=(4, 8),
         **kwargs,
     )

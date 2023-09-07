@@ -1,4 +1,4 @@
-# Copyright (C) 2022, Mindee.
+# Copyright (C) 2021-2023, Mindee.
 
 # This program is licensed under the Apache License 2.0.
 # See LICENSE or go to <https://opensource.org/licenses/Apache-2.0> for full license details.
@@ -19,19 +19,19 @@ __all__ = ["vit_s", "vit_b"]
 
 
 default_cfgs: Dict[str, Dict[str, Any]] = {
-    "vit_b": {
-        "mean": (0.694, 0.695, 0.693),
-        "std": (0.299, 0.296, 0.301),
-        "input_shape": (3, 32, 32),
-        "classes": list(VOCABS["french"]),
-        "url": "https://doctr-static.mindee.com/models?id=v0.5.1/vit_b-103002d1.pt&src=0",
-    },
     "vit_s": {
         "mean": (0.694, 0.695, 0.693),
         "std": (0.299, 0.296, 0.301),
         "input_shape": (3, 32, 32),
         "classes": list(VOCABS["french"]),
-        "url": "https://doctr-static.mindee.com/models?id=v0.5.1/vit_s-cd3472bd.pt&src=0",
+        "url": "https://doctr-static.mindee.com/models?id=v0.6.0/vit_s-5d05442d.pt&src=0",
+    },
+    "vit_b": {
+        "mean": (0.694, 0.695, 0.693),
+        "std": (0.299, 0.296, 0.301),
+        "input_shape": (3, 32, 32),
+        "classes": list(VOCABS["french"]),
+        "url": "https://doctr-static.mindee.com/models?id=v0.6.0/vit_b-0fbef167.pt&src=0",
     },
 }
 
@@ -68,6 +68,7 @@ class VisionTransformer(nn.Sequential):
         num_layers: number of transformer layers
         num_heads: number of attention heads
         ffd_ratio: multiplier for the hidden dimension of the feedforward layer
+        patch_size: size of the patches
         input_shape: size of the input image
         dropout: dropout rate
         num_classes: number of output classes
@@ -80,15 +81,15 @@ class VisionTransformer(nn.Sequential):
         num_layers: int,
         num_heads: int,
         ffd_ratio: int,
+        patch_size: Tuple[int, int] = (4, 4),
         input_shape: Tuple[int, int, int] = (3, 32, 32),
         dropout: float = 0.0,
         num_classes: int = 1000,
         include_top: bool = True,
         cfg: Optional[Dict[str, Any]] = None,
     ) -> None:
-
         _layers: List[nn.Module] = [
-            PatchEmbedding(input_shape, d_model),
+            PatchEmbedding(input_shape, d_model, patch_size),
             EncoderBlock(num_layers, num_heads, d_model, d_model * ffd_ratio, dropout, nn.GELU()),
         ]
         if include_top:
@@ -104,7 +105,6 @@ def _vit(
     ignore_keys: Optional[List[str]] = None,
     **kwargs: Any,
 ) -> VisionTransformer:
-
     kwargs["num_classes"] = kwargs.get("num_classes", len(default_cfgs[arch]["classes"]))
     kwargs["input_shape"] = kwargs.get("input_shape", default_cfgs[arch]["input_shape"])
     kwargs["classes"] = kwargs.get("classes", default_cfgs[arch]["classes"])

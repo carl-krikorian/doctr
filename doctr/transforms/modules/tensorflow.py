@@ -1,4 +1,4 @@
-# Copyright (C) 2021-2022, Mindee.
+# Copyright (C) 2021-2023, Mindee.
 
 # This program is licensed under the Apache License 2.0.
 # See LICENSE or go to <https://opensource.org/licenses/Apache-2.0> for full license details.
@@ -8,11 +8,10 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import numpy as np
 import tensorflow as tf
-import tensorflow_addons as tfa
 
 from doctr.utils.repr import NestedObject
 
-from ..functional.tensorflow import random_shadow
+from ..functional.tensorflow import _gaussian_filter, random_shadow
 
 __all__ = [
     "Compose",
@@ -103,7 +102,6 @@ class Resize(NestedObject):
         img: tf.Tensor,
         target: Optional[np.ndarray] = None,
     ) -> Union[tf.Tensor, Tuple[tf.Tensor, np.ndarray]]:
-
         input_dtype = img.dtype
 
         img = tf.image.resize(img, self.wanted_size, self.method, self.preserve_aspect_ratio)
@@ -386,11 +384,14 @@ class GaussianBlur(NestedObject):
 
     @tf.function
     def __call__(self, img: tf.Tensor) -> tf.Tensor:
-        sigma = random.uniform(self.std[0], self.std[1])
-        return tfa.image.gaussian_filter2d(
-            img,
-            filter_shape=self.kernel_shape,
-            sigma=sigma,
+        return tf.squeeze(
+            _gaussian_filter(
+                img[tf.newaxis, ...],
+                kernel_size=self.kernel_shape,
+                sigma=random.uniform(self.std[0], self.std[1]),
+                mode="REFLECT",
+            ),
+            axis=0,
         )
 
 

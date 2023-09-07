@@ -1,17 +1,21 @@
-# Copyright (C) 2021-2022, Mindee.
+# Copyright (C) 2021-2023, Mindee.
 
 # This program is licensed under the Apache License 2.0.
 # See LICENSE or go to <https://opensource.org/licenses/Apache-2.0> for full license details.
 
 import logging
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple, Union
 
 import torch
 from torch import nn
 
 from doctr.utils.data import download_from_url
 
-__all__ = ["load_pretrained_params", "conv_sequence_pt", "export_model_to_onnx"]
+__all__ = ["load_pretrained_params", "conv_sequence_pt", "set_device_and_dtype", "export_model_to_onnx", "_copy_tensor"]
+
+
+def _copy_tensor(x: torch.Tensor) -> torch.Tensor:
+    return x.clone().detach()
 
 
 def load_pretrained_params(
@@ -90,6 +94,31 @@ def conv_sequence_pt(
     return conv_seq
 
 
+def set_device_and_dtype(
+    model: Any, batches: List[torch.Tensor], device: Union[str, torch.device], dtype: torch.dtype
+) -> Tuple[Any, List[torch.Tensor]]:
+    """Set the device and dtype of a model and its batches
+
+    >>> import torch
+    >>> from torch import nn
+    >>> from doctr.models.utils import set_device_and_dtype
+    >>> model = nn.Sequential(nn.Linear(8, 8), nn.ReLU(), nn.Linear(8, 4))
+    >>> batches = [torch.rand(8) for _ in range(2)]
+    >>> model, batches = set_device_and_dtype(model, batches, device="cuda", dtype=torch.float16)
+
+    Args:
+        model: the model to be set
+        batches: the batches to be set
+        device: the device to be used
+        dtype: the dtype to be used
+
+    Returns:
+        the model and batches set
+    """
+
+    return model.to(device=device, dtype=dtype), [batch.to(device=device, dtype=dtype) for batch in batches]
+
+
 def export_model_to_onnx(model: nn.Module, model_name: str, dummy_input: torch.Tensor, **kwargs: Any) -> str:
     """Export model to ONNX format.
 
@@ -116,7 +145,6 @@ def export_model_to_onnx(model: nn.Module, model_name: str, dummy_input: torch.T
         output_names=["logits"],
         dynamic_axes={"input": {0: "batch_size"}, "logits": {0: "batch_size"}},
         export_params=True,
-        opset_version=14,  # minimum opset which support all operators we use (v0.5.2)
         verbose=False,
         **kwargs,
     )

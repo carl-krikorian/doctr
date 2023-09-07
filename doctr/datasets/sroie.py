@@ -1,4 +1,4 @@
-# Copyright (C) 2021-2022, Mindee.
+# Copyright (C) 2021-2023, Mindee.
 
 # This program is licensed under the Apache License 2.0.
 # See LICENSE or go to <https://opensource.org/licenses/Apache-2.0> for full license details.
@@ -38,10 +38,12 @@ class SROIE(VisionDataset):
     TRAIN = (
         "https://doctr-static.mindee.com/models?id=v0.1.1/sroie2019_train_task1.zip&src=0",
         "d4fa9e60abb03500d83299c845b9c87fd9c9430d1aeac96b83c5d0bb0ab27f6f",
+        "sroie2019_train_task1.zip",
     )
     TEST = (
         "https://doctr-static.mindee.com/models?id=v0.1.1/sroie2019_test.zip&src=0",
         "41b3c746a20226fddc80d86d4b2a903d43b5be4f521dd1bbe759dbf8844745e2",
+        "sroie2019_test.zip",
     )
 
     def __init__(
@@ -51,11 +53,10 @@ class SROIE(VisionDataset):
         recognition_task: bool = False,
         **kwargs: Any,
     ) -> None:
-
-        url, sha256 = self.TRAIN if train else self.TEST
+        url, sha256, name = self.TRAIN if train else self.TEST
         super().__init__(
             url,
-            None,
+            name,
             sha256,
             True,
             pre_transforms=convert_target_to_relative if not recognition_task else None,
@@ -68,7 +69,6 @@ class SROIE(VisionDataset):
         np_dtype = np.float32
 
         for img_path in tqdm(iterable=os.listdir(tmp_root), desc="Unpacking SROIE", total=len(os.listdir(tmp_root))):
-
             # File existence check
             if not os.path.exists(os.path.join(tmp_root, img_path)):
                 raise FileNotFoundError(f"unable to locate {os.path.join(tmp_root, img_path)}")

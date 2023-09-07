@@ -1,4 +1,4 @@
-# Copyright (C) 2021-2022, Mindee.
+# Copyright (C) 2021-2023, Mindee.
 
 # This program is licensed under the Apache License 2.0.
 # See LICENSE or go to <https://opensource.org/licenses/Apache-2.0> for full license details.
@@ -19,13 +19,14 @@ from fastprogress.fastprogress import master_bar, progress_bar
 from torch.nn.functional import cross_entropy
 from torch.optim.lr_scheduler import CosineAnnealingLR, MultiplicativeLR, OneCycleLR
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
-from torchvision.transforms import (
-    ColorJitter,
+from torchvision.transforms.v2 import (
     Compose,
     GaussianBlur,
-    Grayscale,
     InterpolationMode,
     Normalize,
+    RandomGrayscale,
+    RandomPerspective,
+    RandomPhotometricDistort,
     RandomRotation,
 )
 
@@ -108,14 +109,12 @@ def record_lr(
 
 
 def fit_one_epoch(model, train_loader, batch_transforms, optimizer, scheduler, mb, amp=False):
-
     if amp:
         scaler = torch.cuda.amp.GradScaler()
 
     model.train()
     # Iterate over the batches of the dataset
     for images, targets in progress_bar(train_loader, parent=mb):
-
         if torch.cuda.is_available():
             images = images.cuda()
             targets = targets.cuda()
@@ -174,7 +173,6 @@ def evaluate(model, val_loader, batch_transforms, amp=False):
 
 
 def main(args):
-
     print(args)
 
     if args.push_to_hub:
@@ -258,10 +256,12 @@ def main(args):
                 T.Resize((args.input_size, args.input_size)),
                 # Augmentations
                 T.RandomApply(T.ColorInversion(), 0.9),
-                # GaussianNoise
-                T.RandomApply(Grayscale(3), 0.1),
-                ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.02),
-                T.RandomApply(GaussianBlur(kernel_size=(3, 3), sigma=(0.1, 3)), 0.3),
+                RandomGrayscale(p=0.1),
+                RandomPhotometricDistort(p=0.1),
+                T.RandomApply(T.RandomShadow(), p=0.4),
+                T.RandomApply(T.GaussianNoise(mean=0, std=0.1), 0.1),
+                T.RandomApply(GaussianBlur(3), 0.3),
+                RandomPerspective(distortion_scale=0.2, p=0.3),
                 RandomRotation(15, interpolation=InterpolationMode.BILINEAR),
             ]
         ),
@@ -309,7 +309,6 @@ def main(args):
 
     # W&B
     if args.wb:
-
         run = wandb.init(
             name=exp_name,
             project="character-classification",

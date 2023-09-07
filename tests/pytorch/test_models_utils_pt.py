@@ -1,13 +1,19 @@
 import os
 
 import pytest
+import torch
 from torch import nn
 
-from doctr.models.utils import conv_sequence_pt, load_pretrained_params
+from doctr.models.utils import _copy_tensor, conv_sequence_pt, load_pretrained_params, set_device_and_dtype
+
+
+def test_copy_tensor():
+    x = torch.rand(8)
+    m = _copy_tensor(x)
+    assert m.device == x.device and m.dtype == x.dtype and m.shape == x.shape and torch.allclose(m, x)
 
 
 def test_load_pretrained_params(tmpdir_factory):
-
     model = nn.Sequential(nn.Linear(8, 8), nn.ReLU(), nn.Linear(8, 4))
     # Retrieve this URL
     url = "https://github.com/mindee/doctr/releases/download/v0.2.1/tmp_checkpoint-6f0ce0e6.pt"
@@ -29,8 +35,20 @@ def test_load_pretrained_params(tmpdir_factory):
 
 
 def test_conv_sequence():
-
     assert len(conv_sequence_pt(3, 8, kernel_size=3)) == 1
     assert len(conv_sequence_pt(3, 8, True, kernel_size=3)) == 2
     assert len(conv_sequence_pt(3, 8, False, True, kernel_size=3)) == 2
     assert len(conv_sequence_pt(3, 8, True, True, kernel_size=3)) == 3
+
+
+def test_set_device_and_dtype():
+    model = nn.Sequential(nn.Linear(8, 8), nn.ReLU(), nn.Linear(8, 4))
+    batches = [torch.rand(8) for _ in range(2)]
+    model, batches = set_device_and_dtype(model, batches, device="cpu", dtype=torch.float32)
+    assert model[0].weight.device == torch.device("cpu")
+    assert model[0].weight.dtype == torch.float32
+    assert batches[0].device == torch.device("cpu")
+    assert batches[0].dtype == torch.float32
+    model, batches = set_device_and_dtype(model, batches, device="cpu", dtype=torch.float16)
+    assert model[0].weight.dtype == torch.float16
+    assert batches[0].dtype == torch.float16

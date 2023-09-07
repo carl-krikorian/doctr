@@ -1,4 +1,4 @@
-# Copyright (C) 2021-2022, Mindee.
+# Copyright (C) 2021-2023, Mindee.
 
 # This program is licensed under the Apache License 2.0.
 # See LICENSE or go to <https://opensource.org/licenses/Apache-2.0> for full license details.
@@ -38,7 +38,7 @@ default_cfgs: Dict[str, Dict[str, Any]] = {
         "std": (0.299, 0.296, 0.301),
         "input_shape": (32, 128, 3),
         "vocab": VOCABS["french"],
-        "url": None,
+        "url": "https://doctr-static.mindee.com/models?id=v0.6.0/crnn_mobilenet_v3_large-cccc50b1.zip&src=0",
     },
 }
 
@@ -190,7 +190,6 @@ class CRNN(RecognitionModel, Model):
         top_paths: int = 1,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-
         if kwargs.get("training", False) and target is None:
             raise ValueError("Need to provide labels during training")
 
@@ -228,7 +227,6 @@ def _crnn(
     input_shape: Optional[Tuple[int, int, int]] = None,
     **kwargs: Any,
 ) -> CRNN:
-
     pretrained_backbone = pretrained_backbone and not pretrained
 
     kwargs["vocab"] = kwargs.get("vocab", default_cfgs[arch]["vocab"])

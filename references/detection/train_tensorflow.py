@@ -1,4 +1,4 @@
-# Copyright (C) 2021-2022, Mindee.
+# Copyright (C) 2021-2023, Mindee.
 
 # This program is licensed under the Apache License 2.0.
 # See LICENSE or go to <https://opensource.org/licenses/Apache-2.0> for full license details.
@@ -16,7 +16,6 @@ import time
 import numpy as np
 import psutil
 import tensorflow as tf
-import wandb
 from fastprogress.fastprogress import master_bar, progress_bar
 from tensorflow.keras import mixed_precision
 
@@ -30,7 +29,7 @@ from doctr import transforms as T
 from doctr.datasets import DataLoader, DetectionDataset
 from doctr.models import detection
 from doctr.utils.metrics import LocalizationConfusion
-from utils import plot_recorder, plot_samples
+from utils import load_backbone, plot_recorder, plot_samples
 
 
 def record_lr(
@@ -58,7 +57,6 @@ def record_lr(
     loss_recorder = []
 
     for batch_idx, (images, targets) in enumerate(train_loader):
-
         images = batch_transforms(images)
 
         # Forward, Backward & update
@@ -91,7 +89,6 @@ def fit_one_epoch(model, train_loader, batch_transforms, optimizer, mb, amp=Fals
     train_iter = iter(train_loader)
     # Iterate over the batches of the dataset
     for images, targets in progress_bar(train_iter, parent=mb):
-
         images = batch_transforms(images)
 
         with tf.GradientTape() as tape:
@@ -115,11 +112,12 @@ def evaluate(model, val_loader, batch_transforms, val_metric):
         out = model(images, targets, training=False, return_preds=True)
         # Compute metric
         loc_preds = out["preds"]
-        for boxes_gt, boxes_pred in zip(targets, loc_preds):
-            if args.rotation and args.eval_straight:
-                # Convert pred to boxes [xmin, ymin, xmax, ymax]  N, 4, 2 --> N, 4
-                boxes_pred = np.concatenate((boxes_pred.min(axis=1), boxes_pred.max(axis=1)), axis=-1)
-            val_metric.update(gts=boxes_gt, preds=boxes_pred[:, :4])
+        for target, loc_pred in zip(targets, loc_preds):
+            for boxes_gt, boxes_pred in zip(target.values(), loc_pred.values()):
+                if args.rotation and args.eval_straight:
+                    # Convert pred to boxes [xmin, ymin, xmax, ymax]  N, 4, 2 --> N, 4
+                    boxes_pred = np.concatenate((boxes_pred.min(axis=1), boxes_pred.max(axis=1)), axis=-1)
+                val_metric.update(gts=boxes_gt, preds=boxes_pred[:, :4])
 
         val_loss += out["loss"].numpy()
         batch_cnt += 1
@@ -130,7 +128,6 @@ def evaluate(model, val_loader, batch_transforms, val_metric):
 
 
 def main(args):
-
     print(args)
 
     if args.push_to_hub:
@@ -192,11 +189,17 @@ def main(args):
         pretrained=args.pretrained,
         input_shape=(args.input_size, args.input_size, 3),
         assume_straight_pages=not args.rotation,
+        class_names=val_set.class_names,
     )
 
     # Resume weights
     if isinstance(args.resume, str):
         model.load_weights(args.resume)
+
+    if isinstance(args.pretrained_backbone, str):
+        print("Loading backbone weights.")
+        model = load_backbone(model, args.pretrained_backbone)
+        print("Done.")
 
     # Metrics
     val_metric = LocalizationConfusion(
@@ -271,6 +274,7 @@ def main(args):
         decay_steps=args.epochs * len(train_loader),
         decay_rate=1 / (25e4),  # final lr as a fraction of initial lr
         staircase=False,
+        name="ExponentialDecay",
     )
     optimizer = tf.keras.optimizers.Adam(learning_rate=scheduler, beta_1=0.95, beta_2=0.99, epsilon=1e-6, clipnorm=5)
     if args.amp:
@@ -285,28 +289,33 @@ def main(args):
     current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     exp_name = f"{args.arch}_{current_time}" if args.name is None else args.name
 
+    config = {
+        "learning_rate": args.lr,
+        "epochs": args.epochs,
+        "batch_size": args.batch_size,
+        "architecture": args.arch,
+        "input_size": args.input_size,
+        "optimizer": optimizer.name,
+        "framework": "tensorflow",
+        "scheduler": scheduler.name,
+        "train_hash": train_hash,
+        "val_hash": val_hash,
+        "pretrained": args.pretrained,
+        "rotation": args.rotation,
+    }
+
     # W&B
     if args.wb:
+        import wandb
 
-        run = wandb.init(
-            name=exp_name,
-            project="text-detection",
-            config={
-                "learning_rate": args.lr,
-                "epochs": args.epochs,
-                "weight_decay": 0.0,
-                "batch_size": args.batch_size,
-                "architecture": args.arch,
-                "input_size": args.input_size,
-                "optimizer": "adam",
-                "framework": "tensorflow",
-                "scheduler": "exp_decay",
-                "train_hash": train_hash,
-                "val_hash": val_hash,
-                "pretrained": args.pretrained,
-                "rotation": args.rotation,
-            },
-        )
+        run = wandb.init(name=exp_name, project="text-detection", config=config)
+
+    # ClearML
+    if args.clearml:
+        from clearml import Task
+
+        task = Task.init(project_name="docTR/text-detection", task_name=exp_name, reuse_last_task_id=False)
+        task.upload_artifact("config", config)
 
     if args.freeze_backbone:
         for layer in model.feat_extractor.layers:
@@ -341,6 +350,16 @@ def main(args):
                 }
             )
 
+        # ClearML
+        if args.clearml:
+            from clearml import Logger
+
+            logger = Logger.current_logger()
+            logger.report_scalar(title="Validation Loss", series="val_loss", value=val_loss, iteration=epoch)
+            logger.report_scalar(title="Precision Recall", series="recall", value=recall, iteration=epoch)
+            logger.report_scalar(title="Precision Recall", series="precision", value=precision, iteration=epoch)
+            logger.report_scalar(title="Mean IoU", series="mean_iou", value=mean_iou, iteration=epoch)
+
     if args.wb:
         run.finish()
 
@@ -356,9 +375,9 @@ def parse_args():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    parser.add_argument("train_path", type=str, help="path to training data folder")
-    parser.add_argument("val_path", type=str, help="path to validation data folder")
     parser.add_argument("arch", type=str, help="text-detection model to train")
+    parser.add_argument("--train_path", type=str, required=True, help="path to training data folder")
+    parser.add_argument("--val_path", type=str, help="path to validation data folder")
     parser.add_argument("--name", type=str, default=None, help="Name of your training experiment")
     parser.add_argument("--epochs", type=int, default=10, help="number of epochs to train the model on")
     parser.add_argument("-b", "--batch_size", type=int, default=2, help="batch size for training")
@@ -366,6 +385,7 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=0.001, help="learning rate for the optimizer (Adam)")
     parser.add_argument("-j", "--workers", type=int, default=None, help="number of workers used for dataloading")
     parser.add_argument("--resume", type=str, default=None, help="Path to your checkpoint")
+    parser.add_argument("--pretrained-backbone", type=str, default=None, help="Path to your backbone weights")
     parser.add_argument("--test-only", dest="test_only", action="store_true", help="Run the validation loop")
     parser.add_argument(
         "--freeze-backbone", dest="freeze_backbone", action="store_true", help="freeze model backbone for fine-tuning"
@@ -374,6 +394,7 @@ def parse_args():
         "--show-samples", dest="show_samples", action="store_true", help="Display unormalized training samples"
     )
     parser.add_argument("--wb", dest="wb", action="store_true", help="Log to Weights & Biases")
+    parser.add_argument("--clearml", dest="clearml", action="store_true", help="Log to ClearML")
     parser.add_argument("--push-to-hub", dest="push_to_hub", action="store_true", help="Push to Huggingface Hub")
     parser.add_argument(
         "--pretrained",

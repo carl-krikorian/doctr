@@ -1,4 +1,4 @@
-# Copyright (C) 2021-2022, Mindee.
+# Copyright (C) 2021-2023, Mindee.
 
 # This program is licensed under the Apache License 2.0.
 # See LICENSE or go to <https://opensource.org/licenses/Apache-2.0> for full license details.
@@ -14,7 +14,6 @@ import time
 
 import numpy as np
 import tensorflow as tf
-import wandb
 from fastprogress.fastprogress import master_bar, progress_bar
 from tensorflow.keras import mixed_precision
 
@@ -56,7 +55,6 @@ def record_lr(
     loss_recorder = []
 
     for batch_idx, (images, targets) in enumerate(train_loader):
-
         images = batch_transforms(images)
 
         # Forward, Backward & update
@@ -123,7 +121,6 @@ def evaluate(model, val_loader, batch_transforms):
 
 
 def collate_fn(samples):
-
     images, targets = zip(*samples)
     images = tf.stack(images, axis=0)
 
@@ -131,7 +128,6 @@ def collate_fn(samples):
 
 
 def main(args):
-
     print(args)
 
     if args.push_to_hub:
@@ -248,6 +244,7 @@ def main(args):
         decay_steps=args.epochs * len(train_loader),
         decay_rate=1 / (1e3),  # final lr as a fraction of initial lr
         staircase=False,
+        name="ExponentialDecay",
     )
     optimizer = tf.keras.optimizers.Adam(
         learning_rate=scheduler,
@@ -268,26 +265,30 @@ def main(args):
     current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     exp_name = f"{args.arch}_{current_time}" if args.name is None else args.name
 
+    config = {
+        "learning_rate": args.lr,
+        "epochs": args.epochs,
+        "batch_size": args.batch_size,
+        "architecture": args.arch,
+        "input_size": args.input_size,
+        "optimizer": optimizer.name,
+        "framework": "tensorflow",
+        "vocab": args.vocab,
+        "scheduler": scheduler.name,
+        "pretrained": args.pretrained,
+    }
+
     # W&B
     if args.wb:
+        import wandb
 
-        run = wandb.init(
-            name=exp_name,
-            project="character-classification",
-            config={
-                "learning_rate": args.lr,
-                "epochs": args.epochs,
-                "weight_decay": 0.0,
-                "batch_size": args.batch_size,
-                "architecture": args.arch,
-                "input_size": args.input_size,
-                "optimizer": "adam",
-                "framework": "tensorflow",
-                "vocab": args.vocab,
-                "scheduler": "exp_decay",
-                "pretrained": args.pretrained,
-            },
-        )
+        run = wandb.init(name=exp_name, project="character-classification", config=config)
+    # ClearML
+    if args.clearml:
+        from clearml import Task
+
+        task = Task.init(project_name="docTR/character-classification", task_name=exp_name, reuse_last_task_id=False)
+        task.upload_artifact("config", config)
 
     # Create loss queue
     min_loss = np.inf
@@ -312,6 +313,14 @@ def main(args):
                     "acc": acc,
                 }
             )
+
+        # ClearML
+        if args.clearml:
+            from clearml import Logger
+
+            logger = Logger.current_logger()
+            logger.report_scalar(title="Validation Loss", series="val_loss", value=val_loss, iteration=epoch)
+            logger.report_scalar(title="Accuracy", series="acc", value=acc, iteration=epoch)
 
     if args.wb:
         run.finish()
@@ -370,6 +379,7 @@ def parse_args():
         "--show-samples", dest="show_samples", action="store_true", help="Display unormalized training samples"
     )
     parser.add_argument("--wb", dest="wb", action="store_true", help="Log to Weights & Biases")
+    parser.add_argument("--clearml", dest="clearml", action="store_true", help="Log to ClearML")
     parser.add_argument("--push-to-hub", dest="push_to_hub", action="store_true", help="Push to Huggingface Hub")
     parser.add_argument(
         "--pretrained",

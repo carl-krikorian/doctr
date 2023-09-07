@@ -4,6 +4,7 @@ import tempfile
 
 import numpy as np
 import onnxruntime
+import psutil
 import pytest
 import tensorflow as tf
 
@@ -12,13 +13,17 @@ from doctr.models import recognition
 from doctr.models.preprocessor import PreProcessor
 from doctr.models.recognition.crnn.tensorflow import CTCPostProcessor
 from doctr.models.recognition.master.tensorflow import MASTERPostProcessor
+from doctr.models.recognition.parseq.tensorflow import PARSeqPostProcessor
 from doctr.models.recognition.predictor import RecognitionPredictor
 from doctr.models.recognition.sar.tensorflow import SARPostProcessor
 from doctr.models.recognition.vitstr.tensorflow import ViTSTRPostProcessor
 from doctr.models.utils import export_model_to_onnx
 from doctr.utils.geometry import extract_crops
 
+system_available_memory = int(psutil.virtual_memory().available / 1024**3)
 
+
+@pytest.mark.parametrize("train_mode", [True, False])
 @pytest.mark.parametrize(
     "arch_name, input_shape",
     [
@@ -29,24 +34,32 @@ from doctr.utils.geometry import extract_crops
         ["master", (32, 128, 3)],
         ["vitstr_small", (32, 128, 3)],
         ["vitstr_base", (32, 128, 3)],
+        ["parseq", (32, 128, 3)],
     ],
 )
-def test_recognition_models(arch_name, input_shape):
+def test_recognition_models(arch_name, input_shape, train_mode):
     batch_size = 4
     reco_model = recognition.__dict__[arch_name](pretrained=True, input_shape=input_shape)
     assert isinstance(reco_model, tf.keras.Model)
     input_tensor = tf.random.uniform(shape=[batch_size, *input_shape], minval=0, maxval=1)
     target = ["i", "am", "a", "jedi"]
 
-    out = reco_model(input_tensor, target, return_model_output=True, return_preds=True)
+    out = reco_model(
+        input_tensor,
+        target,
+        return_model_output=True,
+        return_preds=not train_mode,
+        training=train_mode,
+    )
     assert isinstance(out, dict)
-    assert len(out) == 3
+    assert len(out) == 3 if not train_mode else len(out) == 2
     assert isinstance(out["out_map"], tf.Tensor)
     assert out["out_map"].dtype == tf.float32
-    assert isinstance(out["preds"], list)
-    assert len(out["preds"]) == batch_size
-    assert all(isinstance(word, str) and isinstance(conf, float) and 0 <= conf <= 1 for word, conf in out["preds"])
-    assert isinstance(out["loss"], tf.Tensor)
+    if not train_mode:
+        assert isinstance(out["preds"], list)
+        assert len(out["preds"]) == batch_size
+        assert all(isinstance(word, str) and isinstance(conf, float) and 0 <= conf <= 1 for word, conf in out["preds"])
+        assert isinstance(out["loss"], tf.Tensor)
     # test model in train mode needs targets
     with pytest.raises(ValueError):
         reco_model(input_tensor, None, training=True)
@@ -59,6 +72,7 @@ def test_recognition_models(arch_name, input_shape):
         [CTCPostProcessor, [2, 30, 119]],
         [MASTERPostProcessor, [2, 30, 119]],
         [ViTSTRPostProcessor, [2, 30, 119]],
+        [PARSeqPostProcessor, [2, 30, 119]],
     ],
 )
 def test_reco_postprocessors(post_processor, input_shape, mock_vocab):
@@ -74,7 +88,6 @@ def test_reco_postprocessors(post_processor, input_shape, mock_vocab):
 
 @pytest.fixture(scope="session")
 def test_recognitionpredictor(mock_pdf, mock_vocab):  # noqa: F811
-
     batch_size = 4
     predictor = RecognitionPredictor(
         PreProcessor(output_size=(32, 128), batch_size=batch_size, preserve_aspect_ratio=True),
@@ -110,6 +123,7 @@ def test_recognitionpredictor(mock_pdf, mock_vocab):  # noqa: F811
         "master",
         "vitstr_small",
         "vitstr_base",
+        "parseq",
     ],
 )
 def test_recognition_zoo(arch_name):
@@ -155,16 +169,26 @@ def test_recognition_zoo_error():
         _ = recognition.zoo.recognition_predictor("my_fancy_model", pretrained=False)
 
 
-@pytest.mark.skipif(os.getenv("SLOW", "0") == "0", reason="slow test")
 @pytest.mark.parametrize(
     "arch_name, input_shape",
     [
         ["crnn_vgg16_bn", (32, 128, 3)],
         ["crnn_mobilenet_v3_small", (32, 128, 3)],
         ["crnn_mobilenet_v3_large", (32, 128, 3)],
-        ["sar_resnet31", (32, 128, 3)],
-        ["master", (32, 128, 3)],
         ["vitstr_small", (32, 128, 3)],  # testing one vitstr version is enough
+        pytest.param(
+            "sar_resnet31",
+            (32, 128, 3),
+            marks=pytest.mark.skipif(system_available_memory < 16, reason="to less memory"),
+        ),
+        pytest.param(
+            "master", (32, 128, 3), marks=pytest.mark.skipif(system_available_memory < 16, reason="to less memory")
+        ),
+        pytest.param(
+            "parseq",
+            (32, 128, 3),
+            marks=pytest.mark.skipif(system_available_memory < 16, reason="to less memory"),
+        ),
     ],
 )
 def test_models_onnx_export(arch_name, input_shape):
@@ -173,7 +197,7 @@ def test_models_onnx_export(arch_name, input_shape):
     tf.keras.backend.clear_session()
     model = recognition.__dict__[arch_name](pretrained=True, exportable=True, input_shape=input_shape)
     # SAR, MASTER, ViTSTR export currently only available with constant batch size
-    if arch_name in ["sar_resnet31", "master", "vitstr_small"]:
+    if arch_name in ["sar_resnet31", "master", "vitstr_small", "parseq"]:
         dummy_input = [tf.TensorSpec([batch_size, *input_shape], tf.float32, name="input")]
     else:
         # batch_size = None for dynamic batch size

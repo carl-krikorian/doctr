@@ -1,4 +1,4 @@
-# Copyright (C) 2022, Mindee.
+# Copyright (C) 2021-2023, Mindee.
 
 # This program is licensed under the Apache License 2.0.
 # See LICENSE or go to <https://opensource.org/licenses/Apache-2.0> for full license details.
@@ -57,21 +57,19 @@ class ViTSTR(_ViTSTR, nn.Module):
         feature_extractor,
         vocab: str,
         embedding_units: int,
-        max_length: int = 25,
+        max_length: int = 32,  # different from paper
         input_shape: Tuple[int, int, int] = (3, 32, 128),  # different from paper
         exportable: bool = False,
         cfg: Optional[Dict[str, Any]] = None,
     ) -> None:
-
         super().__init__()
         self.vocab = vocab
         self.exportable = exportable
         self.cfg = cfg
-        # NOTE: different from paper, who uses eos also as pad token
-        self.max_length = max_length + 3  # Add 1 step for EOS, 1 for SOS, 1 for PAD
+        self.max_length = max_length + 2  # +2 for SOS and EOS
 
         self.feat_extractor = feature_extractor
-        self.head = nn.Linear(embedding_units, len(self.vocab) + 3)
+        self.head = nn.Linear(embedding_units, len(self.vocab) + 1)  # +1 for EOS
 
         self.postprocessor = ViTSTRPostProcessor(vocab=self.vocab)
 
@@ -82,7 +80,6 @@ class ViTSTR(_ViTSTR, nn.Module):
         return_model_output: bool = False,
         return_preds: bool = False,
     ) -> Dict[str, Any]:
-
         features = self.feat_extractor(x)["features"]  # (batch_size, patches_seqlen, d_model)
 
         if target is not None:
@@ -94,11 +91,10 @@ class ViTSTR(_ViTSTR, nn.Module):
             raise ValueError("Need to provide labels during training")
 
         # borrowed from : https://github.com/baudm/parseq/blob/main/strhub/models/vitstr/model.py
-        features = features[:, : self.max_length + 1]  # add 1 for unused cls token (ViT)
-        # (batch_size, max_length + 1, d_model)
+        features = features[:, : self.max_length]  # (batch_size, max_length, d_model)
         B, N, E = features.size()
         features = features.reshape(B * N, E)
-        logits = self.head(features).view(B, N, len(self.vocab) + 3)  # (batch_size, max_length + 1, vocab + 3)
+        logits = self.head(features).view(B, N, len(self.vocab) + 1)  # (batch_size, max_length, vocab + 1)
         decoded_features = logits[:, 1:]  # remove cls_token
 
         out: Dict[str, Any] = {}
@@ -140,10 +136,10 @@ class ViTSTR(_ViTSTR, nn.Module):
         # Add one for additional <eos> token (sos disappear in shift!)
         seq_len = seq_len + 1
         # Compute loss: don't forget to shift gt! Otherwise the model learns to output the gt[t-1]!
-        # The "masked" first gt char is <sos>. Delete last logit of the model output.
-        cce = F.cross_entropy(model_output[:, :-1, :].permute(0, 2, 1), gt[:, 1:], reduction="none")
-        # Compute mask, remove 1 timestep here as well
-        mask_2d = torch.arange(input_len - 1, device=model_output.device)[None, :] >= seq_len[:, None]
+        # The "masked" first gt char is <sos>.
+        cce = F.cross_entropy(model_output.permute(0, 2, 1), gt[:, 1:], reduction="none")
+        # Compute mask
+        mask_2d = torch.arange(input_len, device=model_output.device)[None, :] >= seq_len[:, None]
         cce[mask_2d] = 0
 
         ce_loss = cce.sum(1) / seq_len.to(dtype=model_output.dtype)
@@ -182,26 +178,27 @@ def _vitstr(
     pretrained: bool,
     backbone_fn: Callable[[bool], nn.Module],
     layer: str,
-    pretrained_backbone: bool = False,  # NOTE: training from scratch without a pretrained backbone works better
     ignore_keys: Optional[List[str]] = None,
     **kwargs: Any,
 ) -> ViTSTR:
-
-    pretrained_backbone = pretrained_backbone and not pretrained
-
     # Patch the config
     _cfg = deepcopy(default_cfgs[arch])
     _cfg["vocab"] = kwargs.get("vocab", _cfg["vocab"])
     _cfg["input_shape"] = kwargs.get("input_shape", _cfg["input_shape"])
+    patch_size = kwargs.get("patch_size", (4, 8))
 
     kwargs["vocab"] = _cfg["vocab"]
     kwargs["input_shape"] = _cfg["input_shape"]
 
     # Feature extractor
     feat_extractor = IntermediateLayerGetter(
-        backbone_fn(pretrained_backbone, input_shape=_cfg["input_shape"]),  # type: ignore[call-arg]
+        # NOTE: we don't use a pretrained backbone for non-rectangular patches to avoid the pos embed mismatch
+        backbone_fn(False, input_shape=_cfg["input_shape"], patch_size=patch_size),  # type: ignore[call-arg]
         {layer: "features"},
     )
+
+    kwargs.pop("patch_size", None)
+    kwargs.pop("pretrained_backbone", None)
 
     # Build the model
     model = ViTSTR(feat_extractor, cfg=_cfg, **kwargs)
@@ -238,6 +235,7 @@ def vitstr_small(pretrained: bool = False, **kwargs: Any) -> ViTSTR:
         vit_s,
         "1",
         embedding_units=384,
+        patch_size=(4, 8),
         ignore_keys=["head.weight", "head.bias"],
         **kwargs,
     )
@@ -266,6 +264,7 @@ def vitstr_base(pretrained: bool = False, **kwargs: Any) -> ViTSTR:
         vit_b,
         "1",
         embedding_units=768,
+        patch_size=(4, 8),
         ignore_keys=["head.weight", "head.bias"],
         **kwargs,
     )

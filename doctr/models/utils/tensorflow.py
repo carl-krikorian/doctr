@@ -1,4 +1,4 @@
-# Copyright (C) 2021-2022, Mindee.
+# Copyright (C) 2021-2023, Mindee.
 
 # This program is licensed under the Apache License 2.0.
 # See LICENSE or go to <https://opensource.org/licenses/Apache-2.0> for full license details.
@@ -17,7 +17,11 @@ from doctr.utils.data import download_from_url
 logging.getLogger("tensorflow").setLevel(logging.DEBUG)
 
 
-__all__ = ["load_pretrained_params", "conv_sequence", "IntermediateLayerGetter", "export_model_to_onnx"]
+__all__ = ["load_pretrained_params", "conv_sequence", "IntermediateLayerGetter", "export_model_to_onnx", "_copy_tensor"]
+
+
+def _copy_tensor(x: tf.Tensor) -> tf.Tensor:
+    return tf.identity(x)
 
 
 def load_pretrained_params(
@@ -141,7 +145,6 @@ def export_model_to_onnx(
     large_model = kwargs.get("large_model", False)
     model_proto, _ = tf2onnx.convert.from_keras(
         model,
-        opset=14,  # minimum opset which support all operators we use (v0.5.2)
         input_signature=dummy_input,
         output_path=f"{model_name}.zip" if large_model else f"{model_name}.onnx",
         **kwargs,

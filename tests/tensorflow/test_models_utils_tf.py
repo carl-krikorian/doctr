@@ -5,11 +5,16 @@ import tensorflow as tf
 from tensorflow.keras import Sequential, layers
 from tensorflow.keras.applications import ResNet50
 
-from doctr.models.utils import IntermediateLayerGetter, conv_sequence, load_pretrained_params
+from doctr.models.utils import IntermediateLayerGetter, _copy_tensor, conv_sequence, load_pretrained_params
+
+
+def test_copy_tensor():
+    x = tf.random.uniform(shape=[8], minval=0, maxval=1)
+    m = _copy_tensor(x)
+    assert m.device == x.device and m.dtype == x.dtype and m.shape == x.shape and tf.reduce_all(tf.equal(m, x))
 
 
 def test_load_pretrained_params(tmpdir_factory):
-
     model = Sequential([layers.Dense(8, activation="relu", input_shape=(4,)), layers.Dense(4)])
     # Retrieve this URL
     url = "https://doctr-static.mindee.com/models?id=v0.1-models/tmp_checkpoint-4a98e492.zip&src=0"
@@ -27,7 +32,6 @@ def test_load_pretrained_params(tmpdir_factory):
 
 
 def test_conv_sequence():
-
     assert len(conv_sequence(8, kernel_size=3)) == 1
     assert len(conv_sequence(8, "relu", kernel_size=3)) == 1
     assert len(conv_sequence(8, None, True, kernel_size=3)) == 2

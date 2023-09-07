@@ -1,4 +1,4 @@
-# Copyright (C) 2021-2022, Mindee.
+# Copyright (C) 2021-2023, Mindee.
 
 # This program is licensed under the Apache License 2.0.
 # See LICENSE or go to <https://opensource.org/licenses/Apache-2.0> for full license details.
@@ -8,11 +8,7 @@ from typing import Tuple
 import numpy as np
 import tensorflow as tf
 from PIL import Image
-
-if tf.__version__ >= "2.6.0":
-    from tensorflow.keras.utils import img_to_array
-else:
-    from tensorflow.keras.preprocessing.image import img_to_array
+from tensorflow.keras.utils import img_to_array
 
 from doctr.utils.common_types import AbstractPath
 

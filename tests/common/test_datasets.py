@@ -7,7 +7,7 @@ from doctr import datasets
 
 
 def test_visiondataset():
-    url = "https://data.deepai.org/mnist.zip"
+    url = "https://github.com/mindee/doctr/releases/download/v0.6.0/mnist.zip"
     with pytest.raises(ValueError):
         datasets.datasets.VisionDataset(url, download=False)
 
@@ -17,7 +17,6 @@ def test_visiondataset():
 
 
 def test_abstractdataset(mock_image_path):
-
     with pytest.raises(ValueError):
         datasets.datasets.AbstractDataset("my/fantasy/folder")
 

@@ -1,4 +1,4 @@
-# Copyright (C) 2021-2022, Mindee.
+# Copyright (C) 2021-2023, Mindee.
 
 # This program is licensed under the Apache License 2.0.
 # See LICENSE or go to <https://opensource.org/licenses/Apache-2.0> for full license details.
@@ -26,7 +26,7 @@ class Resize(T.Resize):
         preserve_aspect_ratio: bool = False,
         symmetric_pad: bool = False,
     ) -> None:
-        super().__init__(size, interpolation)
+        super().__init__(size, interpolation, antialias=True)
         self.preserve_aspect_ratio = preserve_aspect_ratio
         self.symmetric_pad = symmetric_pad
 
@@ -38,7 +38,6 @@ class Resize(T.Resize):
         img: torch.Tensor,
         target: Optional[np.ndarray] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, np.ndarray]]:
-
         if isinstance(self.size, int):
             target_ratio = img.shape[-2] / img.shape[-1]
         else:
@@ -65,7 +64,7 @@ class Resize(T.Resize):
                     tmp_size = (self.size, max(int(self.size / actual_ratio), 1))
 
             # Scale image
-            img = F.resize(img, tmp_size, self.interpolation)
+            img = F.resize(img, tmp_size, self.interpolation, antialias=True)
             raw_shape = img.shape[-2:]
             if isinstance(self.size, (tuple, list)):
                 # Pad (inverted in pytorch)

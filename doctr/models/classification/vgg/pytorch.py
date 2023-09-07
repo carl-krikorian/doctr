@@ -1,4 +1,4 @@
-# Copyright (C) 2021-2022, Mindee.
+# Copyright (C) 2021-2023, Mindee.
 
 # This program is licensed under the Apache License 2.0.
 # See LICENSE or go to <https://opensource.org/licenses/Apache-2.0> for full license details.
@@ -35,7 +35,6 @@ def _vgg(
     ignore_keys: Optional[List[str]] = None,
     **kwargs: Any,
 ) -> tv_vgg.VGG:
-
     kwargs["num_classes"] = kwargs.get("num_classes", len(default_cfgs[arch]["classes"]))
     kwargs["classes"] = kwargs.get("classes", default_cfgs[arch]["classes"])
 
@@ -45,7 +44,7 @@ def _vgg(
     kwargs.pop("classes")
 
     # Build the model
-    model = tv_vgg.__dict__[tv_arch](**kwargs)
+    model = tv_vgg.__dict__[tv_arch](**kwargs, weights=None)
     # List the MaxPool2d
     pool_idcs = [idx for idx, m in enumerate(model.features) if isinstance(m, nn.MaxPool2d)]
     # Replace their kernel with rectangular ones

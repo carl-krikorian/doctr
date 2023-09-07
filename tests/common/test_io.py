@@ -1,4 +1,5 @@
 from io import BytesIO
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -18,6 +19,10 @@ def test_read_pdf(mock_pdf):
     doc = io.read_pdf(mock_pdf)
     _check_doc_content(doc, 2)
 
+    # Test with Path
+    doc = io.read_pdf(Path(mock_pdf))
+    _check_doc_content(doc, 2)
+
     with open(mock_pdf, "rb") as f:
         doc = io.read_pdf(f.read())
     _check_doc_content(doc, 2)
@@ -32,7 +37,6 @@ def test_read_pdf(mock_pdf):
 
 
 def test_read_img_as_numpy(tmpdir_factory, mock_pdf):
-
     # Wrong input type
     with pytest.raises(TypeError):
         _ = io.read_img_as_numpy(123)
@@ -88,7 +92,6 @@ def test_document_file(mock_pdf, mock_image_stream):
 
 
 def test_pdf(mock_pdf):
-
     pages = io.DocumentFile.from_pdf(mock_pdf)
 
     # As images

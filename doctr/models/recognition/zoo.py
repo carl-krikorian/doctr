@@ -1,4 +1,4 @@
-# Copyright (C) 2021-2022, Mindee.
+# Copyright (C) 2021-2023, Mindee.
 
 # This program is licensed under the Apache License 2.0.
 # See LICENSE or go to <https://opensource.org/licenses/Apache-2.0> for full license details.
@@ -22,11 +22,11 @@ ARCHS: List[str] = [
     "master",
     "vitstr_small",
     "vitstr_base",
+    "parseq",
 ]
 
 
 def _predictor(arch: Any, pretrained: bool, **kwargs: Any) -> RecognitionPredictor:
-
     if isinstance(arch, str):
         if arch not in ARCHS:
             raise ValueError(f"unknown architecture '{arch}'")
@@ -35,7 +35,9 @@ def _predictor(arch: Any, pretrained: bool, **kwargs: Any) -> RecognitionPredict
             pretrained=pretrained, pretrained_backbone=kwargs.get("pretrained_backbone", True)
         )
     else:
-        if not isinstance(arch, (recognition.CRNN, recognition.SAR, recognition.MASTER, recognition.ViTSTR)):
+        if not isinstance(
+            arch, (recognition.CRNN, recognition.SAR, recognition.MASTER, recognition.ViTSTR, recognition.PARSeq)
+        ):
             raise ValueError(f"unknown architecture: {type(arch)}")
         _model = arch
 

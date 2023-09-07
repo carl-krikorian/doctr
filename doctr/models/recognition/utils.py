@@ -1,11 +1,11 @@
-# Copyright (C) 2021-2022, Mindee.
+# Copyright (C) 2021-2023, Mindee.
 
 # This program is licensed under the Apache License 2.0.
 # See LICENSE or go to <https://opensource.org/licenses/Apache-2.0> for full license details.
 
 from typing import List
 
-from rapidfuzz.string_metric import levenshtein
+from rapidfuzz.distance import Levenshtein
 
 __all__ = ["merge_strings", "merge_multi_strings"]
 
@@ -31,12 +31,12 @@ def merge_strings(a: str, b: str, dil_factor: float) -> str:
     """
     seq_len = min(len(a), len(b))
     if seq_len == 0:  # One sequence is empty, return the other
-        return b if len(a) == 0 else b
+        return b if len(a) == 0 else a
 
     # Initialize merging index and corresponding score (mean Levenstein)
     min_score, index = 1.0, 0  # No overlap, just concatenate
 
-    scores = [levenshtein(a[-i:], b[:i], processor=None) / i for i in range(1, seq_len + 1)]
+    scores = [Levenshtein.distance(a[-i:], b[:i], processor=None) / i for i in range(1, seq_len + 1)]
 
     # Edge case (split in the middle of char repetitions): if it starts with 2 or more 0
     if len(scores) > 1 and (scores[0], scores[1]) == (0, 0):

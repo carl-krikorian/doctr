@@ -7,11 +7,11 @@ import tensorflow as tf
 
 from doctr import datasets
 from doctr.datasets import DataLoader
+from doctr.file_utils import CLASS_NAME
 from doctr.transforms import Resize
 
 
 def _validate_dataset(ds, input_size, batch_size=2, class_indices=False, is_polygons=False):
-
     # Fetch one sample
     img, target = ds[0]
     assert isinstance(img, tf.Tensor)
@@ -39,7 +39,6 @@ def _validate_dataset(ds, input_size, batch_size=2, class_indices=False, is_poly
 
 
 def _validate_dataset_recognition_part(ds, input_size, batch_size=2):
-
     # Fetch one sample
     img, label = ds[0]
     assert isinstance(img, tf.Tensor)
@@ -55,8 +54,17 @@ def _validate_dataset_recognition_part(ds, input_size, batch_size=2):
     assert isinstance(labels, list) and all(isinstance(elt, str) for elt in labels)
 
 
-def test_detection_dataset(mock_image_folder, mock_detection_label):
+def test_visiondataset():
+    url = "https://github.com/mindee/doctr/releases/download/v0.6.0/mnist.zip"
+    with pytest.raises(ValueError):
+        datasets.datasets.VisionDataset(url, download=False)
 
+    dataset = datasets.datasets.VisionDataset(url, download=True, extract_archive=True)
+    assert len(dataset) == 0
+    assert repr(dataset) == "VisionDataset()"
+
+
+def test_detection_dataset(mock_image_folder, mock_detection_label):
     input_size = (1024, 1024)
 
     ds = datasets.DetectionDataset(
@@ -66,11 +74,13 @@ def test_detection_dataset(mock_image_folder, mock_detection_label):
     )
 
     assert len(ds) == 5
-    img, target = ds[0]
+    img, target_dict = ds[0]
+    target = target_dict[CLASS_NAME]
     assert isinstance(img, tf.Tensor)
     assert img.shape[:2] == input_size
     assert img.dtype == tf.float32
     # Bounding boxes
+    assert isinstance(target_dict, dict)
     assert isinstance(target, np.ndarray) and target.dtype == np.float32
     assert np.all(np.logical_and(target[:, :4] >= 0, target[:, :4] <= 1))
     assert target.shape[1] == 4
@@ -78,7 +88,9 @@ def test_detection_dataset(mock_image_folder, mock_detection_label):
     loader = DataLoader(ds, batch_size=2)
     images, targets = next(iter(loader))
     assert isinstance(images, tf.Tensor) and images.shape == (2, *input_size, 3)
-    assert isinstance(targets, list) and all(isinstance(elt, np.ndarray) for elt in targets)
+    assert isinstance(targets, list) and all(
+        isinstance(elt, np.ndarray) for target in targets for elt in target.values()
+    )
 
     # Rotated DS
     rotated_ds = datasets.DetectionDataset(
@@ -88,7 +100,7 @@ def test_detection_dataset(mock_image_folder, mock_detection_label):
         use_polygons=True,
     )
     _, r_target = rotated_ds[0]
-    assert r_target.shape[1:] == (4, 2)
+    assert r_target[CLASS_NAME].shape[1:] == (4, 2)
 
     # File existence check
     img_name, _ = ds.data[0]
@@ -130,7 +142,6 @@ def test_recognition_dataset(mock_image_folder, mock_recognition_label):
     [False, True],
 )
 def test_ocrdataset(mock_ocrdataset, use_polygons):
-
     input_size = (512, 512)
 
     ds = datasets.OCRDataset(
@@ -150,7 +161,6 @@ def test_ocrdataset(mock_ocrdataset, use_polygons):
 
 
 def test_charactergenerator():
-
     input_size = (32, 32)
     vocab = "abcdef"
 
@@ -176,7 +186,6 @@ def test_charactergenerator():
 
 
 def test_wordgenerator():
-
     input_size = (32, 128)
     wordlen_range = (1, 10)
     vocab = "abcdef"
@@ -204,11 +213,11 @@ def test_wordgenerator():
     assert isinstance(targets, list) and len(targets) == 2 and all(isinstance(t, str) for t in targets)
 
 
+@pytest.mark.parametrize("rotate", [True, False])
 @pytest.mark.parametrize(
-    "input_size, num_samples, rotate",
+    "input_size, num_samples",
     [
-        [[512, 512], 3, True],  # Actual set has 2700 training samples and 300 test samples
-        [[512, 512], 3, False],
+        [[512, 512], 3],  # Actual set has 2700 training samples and 300 test samples
     ],
 )
 def test_artefact_detection(input_size, num_samples, rotate, mock_doc_artefacts):
@@ -233,18 +242,17 @@ def test_artefact_detection(input_size, num_samples, rotate, mock_doc_artefacts)
 # NOTE: following datasets support also recognition task
 
 
+@pytest.mark.parametrize("rotate", [True, False])
 @pytest.mark.parametrize(
-    "input_size, num_samples, rotate, recognition",
+    "input_size, num_samples, recognition",
     [
-        [[512, 512], 3, True, False],  # Actual set has 626 training samples and 360 test samples
-        [[512, 512], 3, False, False],
-        [[32, 128], 15, True, True],  # recognition
-        [[32, 128], 15, False, True],
+        [[512, 512], 3, False],  # Actual set has 626 training samples and 360 test samples
+        [[32, 128], 15, True],  # recognition
     ],
 )
 def test_sroie(input_size, num_samples, rotate, recognition, mock_sroie_dataset):
     # monkeypatch the path to temporary dataset
-    datasets.SROIE.TRAIN = (mock_sroie_dataset, None)
+    datasets.SROIE.TRAIN = (mock_sroie_dataset, None, "sroie2019_train_task1.zip")
 
     ds = datasets.SROIE(
         train=True,
@@ -264,13 +272,12 @@ def test_sroie(input_size, num_samples, rotate, recognition, mock_sroie_dataset)
         _validate_dataset(ds, input_size, is_polygons=rotate)
 
 
+@pytest.mark.parametrize("rotate", [True, False])
 @pytest.mark.parametrize(
-    "input_size, num_samples, rotate, recognition",
+    "input_size, num_samples, recognition",
     [
-        [[512, 512], 5, True, False],  # Actual set has 229 train and 233 test samples
-        [[512, 512], 5, False, False],
-        [[32, 128], 25, True, True],  # recognition
-        [[32, 128], 25, False, True],
+        [[512, 512], 5, False],  # Actual set has 229 train and 233 test samples
+        [[32, 128], 25, True],  # recognition
     ],
 )
 def test_ic13_dataset(input_size, num_samples, rotate, recognition, mock_ic13):
@@ -288,13 +295,12 @@ def test_ic13_dataset(input_size, num_samples, rotate, recognition, mock_ic13):
         _validate_dataset(ds, input_size, is_polygons=rotate)
 
 
+@pytest.mark.parametrize("rotate", [True, False])
 @pytest.mark.parametrize(
-    "input_size, num_samples, rotate, recognition",
+    "input_size, num_samples, recognition",
     [
-        [[512, 512], 3, True, False],  # Actual set has 7149 train and 796 test samples
-        [[512, 512], 3, False, False],
-        [[32, 128], 5, True, True],  # recognition
-        [[32, 128], 5, False, True],
+        [[512, 512], 3, False],  # Actual set has 7149 train and 796 test samples
+        [[32, 128], 5, True],  # recognition
     ],
 )
 def test_imgur5k_dataset(input_size, num_samples, rotate, recognition, mock_imgur5k):
@@ -314,13 +320,12 @@ def test_imgur5k_dataset(input_size, num_samples, rotate, recognition, mock_imgu
         _validate_dataset(ds, input_size, is_polygons=rotate)
 
 
+@pytest.mark.parametrize("rotate", [True, False])
 @pytest.mark.parametrize(
-    "input_size, num_samples, rotate, recognition",
+    "input_size, num_samples, recognition",
     [
-        [[32, 128], 3, True, False],  # Actual set has 33402 training samples and 13068 test samples
-        [[32, 128], 3, False, False],
-        [[32, 128], 12, True, True],  # recognition
-        [[32, 128], 12, False, True],
+        [[32, 128], 3, False],  # Actual set has 33402 training samples and 13068 test samples
+        [[32, 128], 12, True],  # recognition
     ],
 )
 def test_svhn(input_size, num_samples, rotate, recognition, mock_svhn_dataset):
@@ -345,13 +350,12 @@ def test_svhn(input_size, num_samples, rotate, recognition, mock_svhn_dataset):
         _validate_dataset(ds, input_size, is_polygons=rotate)
 
 
+@pytest.mark.parametrize("rotate", [True, False])
 @pytest.mark.parametrize(
-    "input_size, num_samples, rotate, recognition",
+    "input_size, num_samples, recognition",
     [
-        [[512, 512], 3, True, False],  # Actual set has 149 training samples and 50 test samples
-        [[512, 512], 3, False, False],
-        [[32, 128], 9, True, True],  # recognition
-        [[32, 128], 9, False, True],
+        [[512, 512], 3, False],  # Actual set has 149 training samples and 50 test samples
+        [[32, 128], 9, True],  # recognition
     ],
 )
 def test_funsd(input_size, num_samples, rotate, recognition, mock_funsd_dataset):
@@ -378,18 +382,17 @@ def test_funsd(input_size, num_samples, rotate, recognition, mock_funsd_dataset)
         _validate_dataset(ds, input_size, is_polygons=rotate)
 
 
+@pytest.mark.parametrize("rotate", [True, False])
 @pytest.mark.parametrize(
-    "input_size, num_samples, rotate, recognition",
+    "input_size, num_samples, recognition",
     [
-        [[512, 512], 3, True, False],  # Actual set has 800 training samples and 100 test samples
-        [[512, 512], 3, False, False],
-        [[32, 128], 9, True, True],  # recognition
-        [[32, 128], 9, False, True],
+        [[512, 512], 3, False],  # Actual set has 800 training samples and 100 test samples
+        [[32, 128], 9, True],  # recognition
     ],
 )
 def test_cord(input_size, num_samples, rotate, recognition, mock_cord_dataset):
     # monkeypatch the path to temporary dataset
-    datasets.CORD.TRAIN = (mock_cord_dataset, None)
+    datasets.CORD.TRAIN = (mock_cord_dataset, None, "cord_train.zip")
 
     ds = datasets.CORD(
         train=True,
@@ -409,13 +412,12 @@ def test_cord(input_size, num_samples, rotate, recognition, mock_cord_dataset):
         _validate_dataset(ds, input_size, is_polygons=rotate)
 
 
+@pytest.mark.parametrize("rotate", [True, False])
 @pytest.mark.parametrize(
-    "input_size, num_samples, rotate, recognition",
+    "input_size, num_samples, recognition",
     [
-        [[512, 512], 2, True, False],  # Actual set has 772875 training samples and 85875 test samples
-        [[512, 512], 2, False, False],
-        [[32, 128], 10, True, True],  # recognition
-        [[32, 128], 10, False, True],
+        [[512, 512], 2, False],  # Actual set has 772875 training samples and 85875 test samples
+        [[32, 128], 10, True],  # recognition
     ],
 )
 def test_synthtext(input_size, num_samples, rotate, recognition, mock_synthtext_dataset):
@@ -441,13 +443,12 @@ def test_synthtext(input_size, num_samples, rotate, recognition, mock_synthtext_
         _validate_dataset(ds, input_size, is_polygons=rotate)
 
 
+@pytest.mark.parametrize("rotate", [True, False])
 @pytest.mark.parametrize(
-    "input_size, num_samples, rotate, recognition",
+    "input_size, num_samples, recognition",
     [
-        [[32, 128], 1, True, False],  # Actual set has 2000 training samples and 3000 test samples
-        [[32, 128], 1, False, False],
-        [[32, 128], 1, True, True],  # recognition
-        [[32, 128], 1, False, True],
+        [[32, 128], 1, False],  # Actual set has 2000 training samples and 3000 test samples
+        [[32, 128], 1, True],  # recognition
     ],
 )
 def test_iiit5k(input_size, num_samples, rotate, recognition, mock_iiit5k_dataset):
@@ -473,13 +474,12 @@ def test_iiit5k(input_size, num_samples, rotate, recognition, mock_iiit5k_datase
         _validate_dataset(ds, input_size, batch_size=1, is_polygons=rotate)
 
 
+@pytest.mark.parametrize("rotate", [True, False])
 @pytest.mark.parametrize(
-    "input_size, num_samples, rotate, recognition",
+    "input_size, num_samples, recognition",
     [
-        [[512, 512], 3, True, False],  # Actual set has 100 training samples and 249 test samples
-        [[512, 512], 3, False, False],
-        [[32, 128], 3, True, True],  # recognition
-        [[32, 128], 3, False, True],
+        [[512, 512], 3, False],  # Actual set has 100 training samples and 249 test samples
+        [[32, 128], 3, True],  # recognition
     ],
 )
 def test_svt(input_size, num_samples, rotate, recognition, mock_svt_dataset):
@@ -505,13 +505,12 @@ def test_svt(input_size, num_samples, rotate, recognition, mock_svt_dataset):
         _validate_dataset(ds, input_size, is_polygons=rotate)
 
 
+@pytest.mark.parametrize("rotate", [True, False])
 @pytest.mark.parametrize(
-    "input_size, num_samples, rotate, recognition",
+    "input_size, num_samples, recognition",
     [
-        [[512, 512], 3, True, False],  # Actual set has 246 training samples and 249 test samples
-        [[512, 512], 3, False, False],
-        [[32, 128], 3, True, True],  # recognition
-        [[32, 128], 3, False, True],
+        [[512, 512], 3, False],  # Actual set has 246 training samples and 249 test samples
+        [[32, 128], 3, True],  # recognition
     ],
 )
 def test_ic03(input_size, num_samples, rotate, recognition, mock_ic03_dataset):
@@ -548,4 +547,16 @@ def test_mjsynth_dataset(mock_mjsynth_dataset):
 
     assert len(ds) == 4  # Actual set has 7581382 train and 1337891 test samples
     assert repr(ds) == f"MJSynth(train={True})"
+    _validate_dataset_recognition_part(ds, input_size)
+
+
+def test_iiithws_dataset(mock_iiithws_dataset):
+    input_size = (32, 128)
+    ds = datasets.IIITHWS(
+        *mock_iiithws_dataset,
+        img_transforms=Resize(input_size, preserve_aspect_ratio=True),
+    )
+
+    assert len(ds) == 4  # Actual set has 7141797 train and 793533 test samples
+    assert repr(ds) == f"IIITHWS(train={True})"
     _validate_dataset_recognition_part(ds, input_size)

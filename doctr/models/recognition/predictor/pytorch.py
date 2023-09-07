@@ -1,4 +1,4 @@
-# Copyright (C) 2021-2022, Mindee.
+# Copyright (C) 2021-2023, Mindee.
 
 # This program is licensed under the Apache License 2.0.
 # See LICENSE or go to <https://opensource.org/licenses/Apache-2.0> for full license details.
@@ -10,6 +10,7 @@ import torch
 from torch import nn
 
 from doctr.models.preprocessor import PreProcessor
+from doctr.models.utils import set_device_and_dtype
 
 from ._utils import remap_preds, split_crops
 
@@ -31,7 +32,6 @@ class RecognitionPredictor(nn.Module):
         model: nn.Module,
         split_wide_crops: bool = True,
     ) -> None:
-
         super().__init__()
         self.pre_processor = pre_processor
         self.model = model.eval()
@@ -46,7 +46,6 @@ class RecognitionPredictor(nn.Module):
         crops: Sequence[Union[np.ndarray, torch.Tensor]],
         **kwargs: Any,
     ) -> List[Tuple[str, float]]:
-
         if len(crops) == 0:
             return []
         # Dimension check
@@ -70,10 +69,11 @@ class RecognitionPredictor(nn.Module):
         processed_batches = self.pre_processor(crops)
 
         # Forward it
-        _device = next(self.model.parameters()).device
-        raw = [
-            self.model(batch.to(device=_device), return_preds=True, **kwargs)["preds"] for batch in processed_batches
-        ]
+        _params = next(self.model.parameters())
+        self.model, processed_batches = set_device_and_dtype(
+            self.model, processed_batches, _params.device, _params.dtype
+        )
+        raw = [self.model(batch, return_preds=True, **kwargs)["preds"] for batch in processed_batches]
 
         # Process outputs
         out = [charseq for batch in raw for charseq in batch]

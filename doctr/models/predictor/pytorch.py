@@ -1,4 +1,4 @@
-# Copyright (C) 2021-2022, Mindee.
+# Copyright (C) 2021-2023, Mindee.
 
 # This program is licensed under the Apache License 2.0.
 # See LICENSE or go to <https://opensource.org/licenses/Apache-2.0> for full license details.
@@ -44,13 +44,12 @@ class OCRPredictor(nn.Module, _OCRPredictor):
         reco_predictor: RecognitionPredictor,
         assume_straight_pages: bool = True,
         straighten_pages: bool = False,
-        preserve_aspect_ratio: bool = False,
+        preserve_aspect_ratio: bool = True,
         symmetric_pad: bool = True,
         detect_orientation: bool = False,
         detect_language: bool = False,
         **kwargs: Any,
     ) -> None:
-
         nn.Module.__init__(self)
         self.det_predictor = det_predictor.eval()  # type: ignore[attr-defined]
         self.reco_predictor = reco_predictor.eval()  # type: ignore[attr-defined]
@@ -66,7 +65,6 @@ class OCRPredictor(nn.Module, _OCRPredictor):
         pages: List[Union[np.ndarray, torch.Tensor]],
         **kwargs: Any,
     ) -> Document:
-
         # Dimension check
         if any(page.ndim != 3 for page in pages):
             raise ValueError("incorrect input shape: all pages are expected to be multi-channel 2D images.")
@@ -94,6 +92,11 @@ class OCRPredictor(nn.Module, _OCRPredictor):
 
         # Localize text elements
         loc_preds = self.det_predictor(pages, **kwargs)
+        assert all(
+            len(loc_pred) == 1 for loc_pred in loc_preds
+        ), "Detection Model in ocr_predictor should output only one class"
+
+        loc_preds = [list(loc_pred.values())[0] for loc_pred in loc_preds]
         # Check whether crop mode should be switched to channels first
         channels_last = len(pages) == 0 or isinstance(pages[0], np.ndarray)
 

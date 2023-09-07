@@ -6,7 +6,6 @@ from doctr.io import decode_img_as_tensor, read_img_as_tensor, tensor_from_numpy
 
 
 def test_read_img_as_tensor(mock_image_path):
-
     img = read_img_as_tensor(mock_image_path)
 
     assert isinstance(img, tf.Tensor)
@@ -18,9 +17,11 @@ def test_read_img_as_tensor(mock_image_path):
     img = read_img_as_tensor(mock_image_path, dtype=tf.uint8)
     assert img.dtype == tf.uint8
 
+    with pytest.raises(ValueError):
+        read_img_as_tensor(mock_image_path, dtype=tf.float64)
+
 
 def test_decode_img_as_tensor(mock_image_stream):
-
     img = decode_img_as_tensor(mock_image_stream)
 
     assert isinstance(img, tf.Tensor)
@@ -32,9 +33,11 @@ def test_decode_img_as_tensor(mock_image_stream):
     img = decode_img_as_tensor(mock_image_stream, dtype=tf.uint8)
     assert img.dtype == tf.uint8
 
+    with pytest.raises(ValueError):
+        decode_img_as_tensor(mock_image_stream, dtype=tf.float64)
+
 
 def test_tensor_from_numpy(mock_image_stream):
-
     with pytest.raises(ValueError):
         tensor_from_numpy(np.zeros((256, 256, 3)), tf.int64)
 
